@@ -8,17 +8,17 @@ pub fn main () void {
     // std_alloc.free(memory: anytype)
     var allocator = alloc.Allocator.init();
 
-    var ints = allocator.alloc(u32, 2);
-    for (0..ints.len) |i| {ints[i]=std.math.maxInt(u32);}
+    const ints = allocator.alloc(u32, 2);
+    @memset(ints, std.math.maxInt(u32));
 
-    var other_ints = allocator.alloc(u8, 5);
-    for (0..other_ints.len) |i| {other_ints[i]=std.math.maxInt(u8)-1;}
+    const other_ints = allocator.alloc(u8, 5);
+    @memset(ints, std.math.maxInt(u8)-1);
 
-    var new_ints = allocator.alloc(u8, 5);
-    for (0..new_ints.len) |i| {new_ints[i]=std.math.maxInt(u8)-5;}
+    const new_ints = allocator.alloc(u8, 5);
+    @memset(new_ints, std.math.maxInt(u8)-5);
 
-    var new_ints_2 = allocator.alloc(u8, 5);
-    for (0..new_ints_2.len) |i| {new_ints_2[i]=std.math.maxInt(u8)-200;}
+    const new_ints_2 = allocator.alloc(u8, 5);
+    @memset(new_ints_2, std.math.maxInt(u8)-200);
 
     std.log.info("Glob data: {any}", .{allocator.data});
     allocator.free(other_ints);

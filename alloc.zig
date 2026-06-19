@@ -25,8 +25,11 @@ pub const Allocator = struct {
     /// last inserted node.
     /// Does NOT count the number of nodes!
     sp: offset_t,
+
     /// Stack of freed_spots in self.nodes
     free_spots: []offset_t,
+    /// Free spots stack pointer
+    fs_sp: offset_t,
 
     pub fn init() Allocator {
         // allocate data buffer
@@ -50,6 +53,7 @@ pub const Allocator = struct {
             .sp = 0,
             .ll_head = 0,
             .free_spots = free_spots,
+            .fs_sp = 0,
         };
     }
 
@@ -177,7 +181,10 @@ pub const Allocator = struct {
 };
 
 const AllocNode = struct {
+    /// offset in Allocator.data to allocated block
     start: offset_t,
+
+    /// length of allocated block
     length: u64,
 
     /// offset in Allocator.nodes to next AllocNode
