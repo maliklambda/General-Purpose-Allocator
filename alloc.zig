@@ -2,6 +2,7 @@ const std = @import("std");
 const print = std.debug.print;
 
 const offset_t = u64;
+const offset_null = std.math.maxInt(offset_t);
 
 const init_data_size = 128;
 const init_num_of_alloc_nodes = 10;
@@ -17,18 +18,20 @@ const AllocError = error{
 pub const Allocator = struct {
     data: []u8,
 
-    /// start of Linked List in self.nodes
+    /// Start of Linked List in self.nodes.
     /// It may be that element #0 is freed.
     ll_head: offset_t,
     nodes: []AllocNode,
 
-    /// last inserted node.
+    /// Last inserted node.
     /// Does NOT count the number of nodes!
     sp: offset_t,
 
-    /// Stack of freed_spots in self.nodes
-    free_spots: []offset_t,
-    /// Free spots stack pointer
+    /// Stack of freed_spots in self.nodes.
+    free_slots: []offset_t,
+
+    /// Free spots stack pointer. 
+    /// Also acts as a count of free slots.
     fs_sp: offset_t,
 
     pub fn init() Allocator {
@@ -45,14 +48,14 @@ pub const Allocator = struct {
         // allocate node buffer
         std.log.info("Initial allocation nodes: {} * {}", .{ init_num_of_alloc_nodes, @sizeOf(AllocNode) });
         const ptr_free_spots = map_memory(init_free_spots_space * @sizeOf(offset_t));
-        const free_spots: []offset_t = @ptrCast(@alignCast(ptr_free_spots[0 .. init_free_spots_space * @sizeOf(offset_t)]));
+        const free_slots: []offset_t = @ptrCast(@alignCast(ptr_free_spots[0 .. init_free_spots_space * @sizeOf(offset_t)]));
 
         return Allocator{
             .data = data,
             .nodes = nodes,
             .sp = 0,
             .ll_head = 0,
-            .free_spots = free_spots,
+            .free_slots = free_slots,
             .fs_sp = 0,
         };
     }
@@ -62,21 +65,21 @@ pub const Allocator = struct {
     /// Allocates n times sizeOf(T). Returns a slice of T with length n.
     pub fn alloc(self: *Allocator, comptime T: type, n: u64) []T {
         defer std.log.info("LL (sp={}): {any}", .{ self.sp, self.nodes[0..self.sp] });
-        defer self.sp += 1;
+        defer std.log.info("Free slots (sp={}): {any}", .{self.fs_sp, self.free_slots[0..self.fs_sp]});
 
         const byte_length = @sizeOf(T) * n;
         std.debug.assert(byte_length < max_bytes_single_alloc);
 
         // initial allocation
         if (self.sp == 0) {
-            self.nodes[0] = AllocNode{ .start = 0, .length = byte_length, .next = 0 };
+            _ = self.alloc_node(AllocNode{ .start = 0, .length = byte_length, .next = offset_null });
             const slice: []T = @ptrCast(@alignCast(self.data.ptr[0..byte_length]));
             return slice;
         } else if (self.sp == 1) {
             std.debug.assert(self.ll_head == 0);
             const start = self.nodes[0].start + self.nodes[0].length;
             self.nodes[0].next = 1;
-            self.nodes[1] = AllocNode{ .start = start, .length = byte_length, .next = 0 };
+            _ = self.alloc_node(AllocNode{ .start = start, .length = byte_length, .next = offset_null });
             const slice: []T = @ptrCast(@alignCast(self.data.ptr[start .. start + byte_length]));
             return slice;
         }
@@ -89,13 +92,13 @@ pub const Allocator = struct {
         if (self.nodes[self.ll_head].start >= byte_length) {
             const start = 0;
             std.log.info("Enough space at beginning of data array", .{});
-            self.nodes[self.sp] = AllocNode{ .start = start, .length = byte_length, .next = self.ll_head };
+            _ = self.alloc_node(AllocNode{ .start = start, .length = byte_length, .next = self.ll_head });
             self.ll_head = 0;
             const slice: []T = @ptrCast(@alignCast(self.data.ptr[start .. start + byte_length]));
             return slice;
         }
 
-        while (cur.next != 0) : ({
+        while (cur.next != offset_null) : ({
             last = cur;
             cur = &self.nodes[cur.next];
         }) {
@@ -105,7 +108,8 @@ pub const Allocator = struct {
                 const start = last.start + last.length;
                 std.log.info("Found matching space @{}", .{last.start + last.length});
                 std.log.info("last: {} -- cur: {}", .{ last, cur });
-                self.nodes[self.sp] = AllocNode{ .start = start, .length = byte_length, .next = last.start };
+                const idx = self.alloc_node(AllocNode{ .start = start, .length = byte_length, .next = last.next });
+                last.*.next = idx;
                 const slice: []T = @ptrCast(@alignCast(self.data.ptr[start .. start + byte_length]));
                 return slice;
             }
@@ -118,8 +122,7 @@ pub const Allocator = struct {
         std.debug.assert(self.sp < self.nodes.len);
 
         const start = cur.start + cur.length;
-        self.nodes[self.sp] = AllocNode{ .start = start, .length = byte_length, .next = 0 };
-        cur.*.next = self.sp;
+        cur.*.next = self.alloc_node(AllocNode{ .start = start, .length = byte_length, .next = offset_null });
 
         const slice: []T = @ptrCast(@alignCast(self.data.ptr[start .. start + byte_length]));
         return slice;
@@ -131,6 +134,7 @@ pub const Allocator = struct {
     /// meaning that an allocated block must be freed in the same manner.
     pub fn free(self: *Allocator, memory: anytype) void {
         defer std.log.info("LL (sp={}): {any}", .{ self.sp, self.nodes[0..self.sp] });
+        defer std.log.info("Free slots (sp={}): {any}", .{self.fs_sp, self.free_slots[0..self.fs_sp]});
 
         std.debug.assert(self.sp > 1);
         const bytes = std.mem.sliceAsBytes(memory);
@@ -145,6 +149,7 @@ pub const Allocator = struct {
             std.log.info("Found AllocNode to free", .{});
             std.debug.assert(last.length == bytes.len);
             self.ll_head = last.next;
+            self.push_free_slot(0);
             @memset(self.data[last.start .. last.start + last.length], 0);
             return;
         }
@@ -157,12 +162,46 @@ pub const Allocator = struct {
             if (left == right) {
                 std.log.info("Found AllocNode to free", .{});
                 std.debug.assert(cur.length == bytes.len);
+                self.push_free_slot(last.*.next);
                 last.*.next = cur.next;
                 @memset(self.data[cur.start .. cur.start + cur.length], 0);
                 return;
             }
         }
         @panic("Requested block was not found");
+    }
+
+    /// Insert a node into the node buffer.
+    /// Index is chosen based on the Allocator's free_slots stack.
+    /// Returns the index of the node.
+    fn alloc_node (self: *Allocator, node: AllocNode) offset_t {
+        if (self.pop_free_slot()) |slot| {
+            self.nodes[slot] = node;
+            return slot;
+        } else {
+            self.nodes[self.sp] = node;
+            defer self.sp += 1;
+            // self.sp += 1;
+            return self.sp;
+        }
+    }
+
+    /// Push a new free-slot on the free_slot stack
+    fn push_free_slot(self: *Allocator, slot: offset_t) void {
+        std.debug.assert(self.fs_sp < self.free_slots.len);
+        self.free_slots[self.fs_sp] = slot;
+        self.fs_sp += 1;
+    }
+
+    /// Pop a free slot
+    fn pop_free_slot(self: *Allocator) ?offset_t {
+        return if (self.fs_sp > 0) {
+            self.fs_sp -= 1; // decrement before indexing
+            const val = self.free_slots[self.fs_sp];
+            return val;
+        } else {
+            return null;
+        };
     }
 
     /// Initial mapping
