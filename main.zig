@@ -1,12 +1,9 @@
 const std = @import("std");
-const alloc = @import("alloc.zig");
+const Allocator = @import("alloc.zig").Allocator;
 
 
 pub fn main () void {
-    // const std_alloc = std.heap.page_allocator;
-    // std_alloc.alloc(comptime T: type, n: usize)
-    // std_alloc.free(memory: anytype)
-    var allocator = alloc.Allocator.init();
+    var allocator = Allocator.init();
 
     const ints = allocator.alloc(u32, 2);
     @memset(ints, std.math.maxInt(u32));
