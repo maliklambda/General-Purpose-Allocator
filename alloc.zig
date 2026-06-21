@@ -1,7 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 
-const offset_t = u64;
+pub const offset_t = u64;
 const offset_null = std.math.maxInt(offset_t);
 
 const init_data_size = 128;
@@ -9,7 +9,7 @@ const init_num_of_alloc_nodes = 10;
 const init_free_spots_space = init_num_of_alloc_nodes;
 
 /// Single allocation may not allocate more than max_bytes_single_alloc.
-const max_bytes_single_alloc = 100;
+const max_bytes_single_alloc = 256;
 
 const AllocError = error{
     FailedAlloc,
@@ -136,9 +136,16 @@ pub const Allocator = struct {
         defer std.log.info("LL (sp={}): {any}", .{ self.sp, self.nodes[0..self.sp] });
         defer std.log.info("Free slots (sp={}): {any}", .{self.fs_sp, self.free_slots[0..self.fs_sp]});
 
-        std.debug.assert(self.sp > 1);
         const bytes = std.mem.sliceAsBytes(memory);
         std.log.info("Mem len: {any}", .{bytes.len});
+
+        if (self.sp == 1) {
+            std.debug.assert(self.ll_head == 0);
+            const start = self.nodes[0].start;
+            @memset(self.data[start..start+bytes.len], 0);
+            self.sp -= 1;
+            return;
+        }
 
         var last: *AllocNode = &self.nodes[self.ll_head];
         var cur: *AllocNode = &self.nodes[last.next];
@@ -181,7 +188,6 @@ pub const Allocator = struct {
         } else {
             self.nodes[self.sp] = node;
             defer self.sp += 1;
-            // self.sp += 1;
             return self.sp;
         }
     }
