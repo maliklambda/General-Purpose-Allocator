@@ -8,7 +8,9 @@ A memory efficient GPA.
 3. [Node buffer](#Node-Buffer)
 4. [Data buffer](#Data-Buffer)
 
+
 ![GPA Architecture diagram](./static/gpa_architecture.png "gpa architecture")
+
 
 ### Allocator
 The main structure, it provides an interface with both alloc() and free().
